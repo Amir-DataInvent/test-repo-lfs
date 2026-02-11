@@ -1,0 +1,633 @@
+{
+  "name": "Autonomous Short-Form Content Growth Agent",
+  "nodes": [
+    {
+      "id": "cron_research",
+      "name": "Cron Daily Research",
+      "type": "n8n-nodes-base.cron",
+      "parameters": {
+        "triggerTimes": [
+          {
+            "hour": 6,
+            "minute": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "cron_creation",
+      "name": "Cron Daily Creation",
+      "type": "n8n-nodes-base.cron",
+      "parameters": {
+        "triggerTimes": [
+          {
+            "hour": 9,
+            "minute": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "cron_reporting",
+      "name": "Cron Daily Reporting",
+      "type": "n8n-nodes-base.cron",
+      "parameters": {
+        "triggerTimes": [
+          {
+            "hour": 20,
+            "minute": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "webhook_manual",
+      "name": "Webhook Manual Override",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-agent/manual-trigger"
+      }
+    },
+    {
+      "id": "router",
+      "name": "Trigger Router",
+      "type": "n8n-nodes-base.switch",
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.triggerType || 'manual'}}",
+        "rules": [
+          {
+            "operation": "equal",
+            "value2": "research"
+          },
+          {
+            "operation": "equal",
+            "value2": "creation"
+          },
+          {
+            "operation": "equal",
+            "value2": "reporting"
+          }
+        ]
+      }
+    },
+    {
+      "id": "yt_trends",
+      "name": "YouTube Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "tt_trends",
+      "name": "TikTok Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://open.tiktokapis.com/v2/research/video/query/",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "ig_trends",
+      "name": "Instagram Reels Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://graph.facebook.com/v21.0/{ig-user-id}/media",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "normalize_metrics",
+      "name": "Normalize + Score",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "return items.map(i => { const d=i.json; const views=Number(d.views||0); const likes=Number(d.likes||0); const comments=Number(d.comments||0); const shares=Number(d.shares||0); const er=views?((likes+comments+shares)/views):0; const growth=Number(d.growthVelocity||0); const competition=Number(d.competitionScore||0); const opportunity=(views*0.35)+(er*0.25)+(growth*0.25)-(competition*0.15); d.engagementRate=er; d.opportunityScore=opportunity; return {json:d}; });"
+      }
+    },
+    {
+      "id": "db_research_upsert",
+      "name": "DB Upsert Research",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "upsert",
+        "table": "research_trends"
+      }
+    },
+    {
+      "id": "agent_strategy",
+      "name": "AI Strategy Agent",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4.1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a growth strategist. Select profitable niche, define pillars, and produce 30-day schedule with hooks, titles, keywords and hashtags."
+          }
+        ]
+      }
+    },
+    {
+      "id": "db_plan_upsert",
+      "name": "DB Upsert Content Plan",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "upsert",
+        "table": "content_plan"
+      }
+    },
+    {
+      "id": "read_today_topic",
+      "name": "Read Today's Topic",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "list",
+        "table": "content_plan"
+      }
+    },
+    {
+      "id": "agent_script",
+      "name": "AI Script Writer",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4.1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Write a 15-45 second vertical short script with hook in first 1.5 seconds and clear CTA."
+          }
+        ]
+      }
+    },
+    {
+      "id": "agent_metadata",
+      "name": "AI Metadata Optimizer",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4.1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Generate optimized title, description, tags and hashtags for YouTube Shorts, Instagram Reels, TikTok."
+          }
+        ]
+      }
+    },
+    {
+      "id": "policy_guard",
+      "name": "Policy Guard",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.policyStatus}}",
+              "operation": "equal",
+              "value2": "safe"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "video_render",
+      "name": "Render Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://api.video-provider.example/render",
+        "method": "POST",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "add_captions",
+      "name": "Caption Burn-In",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://api.captioner.example/captions",
+        "method": "POST",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "approval_optional",
+      "name": "Manual Approval",
+      "type": "n8n-nodes-base.wait",
+      "parameters": {
+        "resume": "webhook"
+      }
+    },
+    {
+      "id": "upload_youtube",
+      "name": "Upload YouTube Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos",
+        "method": "POST",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "upload_instagram",
+      "name": "Upload Instagram Reels",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://graph.facebook.com/v21.0/{ig-user-id}/media",
+        "method": "POST",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "upload_tiktok",
+      "name": "Upload TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "method": "POST",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "retry_controller",
+      "name": "Retry Controller",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "const max=3; return items.map(i=>{const r=i.json.retryCount||0; i.json.shouldRetry=r<max && i.json.status==='failed'; i.json.nextDelaySec=Math.pow(2,r)*30; return i;});"
+      }
+    },
+    {
+      "id": "db_publish_log",
+      "name": "DB Log Published URLs",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "upsert",
+        "table": "published_content"
+      }
+    },
+    {
+      "id": "pull_metrics",
+      "name": "Pull Platform Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://analytics-aggregator.example/metrics",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "id": "metrics_calc",
+      "name": "Metrics Calculator",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "return items.map(i=>{const d=i.json; const views=Number(d.views||0); const likes=Number(d.likes||0); const comments=Number(d.comments||0); const shares=Number(d.shares||0); d.engagement_rate=views?((likes+comments+shares)/views):0; d.actual_score=(d.engagement_rate*0.5)+(Number(d.watchTime||0)*0.3)+(Number(d.retention||0)*0.2); d.delta=(Number(d.predicted_score||0)-d.actual_score); d.winner_flag=d.actual_score>=Number(d.winnerThreshold||0.65); return {json:d};});"
+      }
+    },
+    {
+      "id": "agent_optimizer",
+      "name": "AI Optimization Agent",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-4.1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Analyze performance deltas, detect winning formats, suggest low-performer fixes and niche pivots if needed."
+          }
+        ]
+      }
+    },
+    {
+      "id": "db_metrics_upsert",
+      "name": "DB Upsert Metrics",
+      "type": "n8n-nodes-base.airtable",
+      "parameters": {
+        "operation": "upsert",
+        "table": "performance_metrics"
+      }
+    },
+    {
+      "id": "daily_report",
+      "name": "Daily Summary",
+      "type": "n8n-nodes-base.slack",
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "text": "={{$json.dailySummary}}"
+      }
+    },
+    {
+      "id": "weekly_report",
+      "name": "Weekly Insights",
+      "type": "n8n-nodes-base.slack",
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "text": "={{$json.weeklyInsights}}"
+      }
+    }
+  ],
+  "connections": {
+    "Cron Daily Research": {
+      "main": [
+        [
+          {
+            "node": "YouTube Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Trends": {
+      "main": [
+        [
+          {
+            "node": "TikTok Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok Trends": {
+      "main": [
+        [
+          {
+            "node": "Instagram Reels Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Reels Trends": {
+      "main": [
+        [
+          {
+            "node": "Normalize + Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize + Score": {
+      "main": [
+        [
+          {
+            "node": "DB Upsert Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Upsert Research": {
+      "main": [
+        [
+          {
+            "node": "AI Strategy Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Strategy Agent": {
+      "main": [
+        [
+          {
+            "node": "DB Upsert Content Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Daily Creation": {
+      "main": [
+        [
+          {
+            "node": "Read Today's Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Today's Topic": {
+      "main": [
+        [
+          {
+            "node": "AI Script Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Script Writer": {
+      "main": [
+        [
+          {
+            "node": "AI Metadata Optimizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Metadata Optimizer": {
+      "main": [
+        [
+          {
+            "node": "Policy Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Policy Guard": {
+      "main": [
+        [
+          {
+            "node": "Render Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Video": {
+      "main": [
+        [
+          {
+            "node": "Caption Burn-In",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Caption Burn-In": {
+      "main": [
+        [
+          {
+            "node": "Manual Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Approval": {
+      "main": [
+        [
+          {
+            "node": "Upload YouTube Shorts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload Instagram Reels",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload YouTube Shorts": {
+      "main": [
+        [
+          {
+            "node": "Retry Controller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Instagram Reels": {
+      "main": [
+        [
+          {
+            "node": "Retry Controller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload TikTok": {
+      "main": [
+        [
+          {
+            "node": "Retry Controller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Controller": {
+      "main": [
+        [
+          {
+            "node": "DB Log Published URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Daily Reporting": {
+      "main": [
+        [
+          {
+            "node": "Pull Platform Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull Platform Metrics": {
+      "main": [
+        [
+          {
+            "node": "Metrics Calculator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metrics Calculator": {
+      "main": [
+        [
+          {
+            "node": "AI Optimization Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Optimization Agent": {
+      "main": [
+        [
+          {
+            "node": "DB Upsert Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Upsert Metrics": {
+      "main": [
+        [
+          {
+            "node": "Daily Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Weekly Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
